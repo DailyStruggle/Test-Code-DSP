@@ -12,7 +12,46 @@ uint16_t smoother[40] = {0};
 
 uint32_t global_temp;
 
-uint16_t center = 338;
+uint16_t getCenter(){
+  uint32_t sum = 0;
+  uint32_t k = 2048/n;
+  for (int i = 0; i < k; i++){
+    uint32_t temp = 0;
+    for (int j = 0; j < n; j++){
+      sample[i] = analogRead(1);
+    }
+    for (int j = 0; j < n; j++){
+      temp = temp + sample[i];
+    }
+    sum += temp/n;
+  }
+  sum = sum/k;
+  //for (int i = 0; i < n; i++)Serial.println(sum);
+  return sum;
+}
+
+uint16_t getSensitivity(){
+  uint16_t sens = 0;
+  uint16_t avg_amp = 0;
+  uint16_t sample_count = 1024/n;
+  for (int i = 0; i < sample_count; i++){
+    for (int j=0;j<n;j++)sample[i]=analogRead(1);
+    uint32_t sum = 0;
+    smoother[19] = Sum();
+    for(int i = 0; i < 20; i++){
+      sum += i*smoother[i];
+      smoother[i] = smoother[i+1];
+    }
+    sum = sum>>7;
+    rectify();
+    avg_amp = avg_amp + (sum / n);
+  }
+  avg_amp = avg_amp / sample_count;
+  
+  
+}
+
+uint16_t center = 332;
 
 uint16_t R = 0;        
 uint16_t G = 0;
@@ -23,11 +62,14 @@ static const uint8_t green = 10;
 static const uint8_t blue = 11;
 
 
+
+
+
 void setup() {
   Serial.begin(230400);
-  setPwmFrequency(red, 1);
-  setPwmFrequency(green, 1);
-  setPwmFrequency(blue, 1);
+  //setPwmFrequency(red, 1);
+  //setPwmFrequency(green, 1);
+  //setPwmFrequency(blue, 1);
   pinMode(red, OUTPUT);
   pinMode(green, OUTPUT);
   pinMode(blue, OUTPUT);
@@ -63,8 +105,9 @@ void mov_smooth(uint8_t smoothFactor){
 
 void rectify(){
   for (int i = 0; i < n; i++){
-    if(sample[i]) sample[i] = sample[i] - center;
-    sample[i] = abs(sample[i]);
+    if (!sample[i]);
+    else if(sample[i] > center) sample[i] = sample[i] - center;
+    else sample[i] = center - sample[i];
   }
 }
 
@@ -77,36 +120,7 @@ uint16_t Sum(){
   return sum;
 }
 
-void setPwmFrequency(int pin, int divisor) {
-  byte mode;
-  if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
-    switch(divisor) {
-      case 1: mode = 0x01; break;
-      case 8: mode = 0x02; break;
-      case 64: mode = 0x03; break;
-      case 256: mode = 0x04; break;
-      case 1024: mode = 0x05; break;
-      default: return;
-    }
-    if(pin == 5 || pin == 6) {
-      TCCR0B = TCCR0B & 0b11111000 | mode;
-    } else {
-      TCCR1B = TCCR1B & 0b11111000 | mode;
-    }
-  } else if(pin == 3 || pin == 11) {
-    switch(divisor) {
-      case 1: mode = 0x01; break;
-      case 8: mode = 0x02; break;
-      case 32: mode = 0x03; break;
-      case 64: mode = 0x04; break;
-      case 128: mode = 0x05; break;
-      case 256: mode = 0x06; break;
-      case 1024: mode = 0x07; break;
-      default: return;
-    }
-    TCCR2B = TCCR2B & 0b11111000 | mode;
-  }
-}
+
 
 void DIALtoRGB(uint16_t dialpos){
   while (dialpos >= 360) dialpos-=360; 
@@ -143,23 +157,22 @@ void setBrightness(uint8_t brightness){
 }
 
 uint8_t soundAmp(uint8_t pin, uint8_t sensitivity){
-    uint8_t scale = 20;
+    uint16_t scale = 16;
     
-    for (int i=0;i<n;i++)
-    {
-    sample[i]=analogRead(pin);
-    }
-    
+    for (int i=0;i<n;i++)sample[i]=analogRead(pin);
+    //adjust sensitivity according to smoothing
     mov_smooth(6);
     rectify();
     uint32_t sum = 0;
     //average with previous values to get desired output smoothing
+    ///////////////////////////////
     smoother[19] = Sum();
     for(int i = 0; i < 20; i++){
       sum += i*smoother[i];
       smoother[i] = smoother[i+1];
     }
     sum = sum>>7;
+    /////////////////////////////////
     //newest value
     
     /*
@@ -167,15 +180,10 @@ uint8_t soundAmp(uint8_t pin, uint8_t sensitivity){
     sum = sum/2;          //still prone to jittery output graph
     prev_sum = sum;
     */
-    
-    for (int i=0;i<n;i++)
-    {
-    //Serial.println(sample[i]);
-    }
     sum = scale*sum/n; //scale for amplitude
     Serial.println(sum);
-    if(sum < (sensitivity*scale)/4) return 10; //ignore remaining noise
-    else sum = 10 + sum - (sensitivity*scale)/4;
+    if(sum < (sensitivity*scale)/4) return 0; //ignore remaining noise
+    else sum = sum - (sensitivity*scale)/4;
     if (sum < 256) return sum;
     else return 255;
 }
@@ -191,5 +199,7 @@ void ampReactive(uint16_t color, uint8_t max_brightness, uint16_t sensitivity){
 }
 
 void loop() {
-  while(1)ampReactive(0, 255, 16);
+  delay(50);
+  center = getCenter();
+  while(1)ampReactive(0, 50, 4);
 }
